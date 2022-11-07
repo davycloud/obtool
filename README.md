@@ -1,2 +1,3 @@
 # obtool
- A command lint tool for Obsidian
+
+ A command line tool for Obsidian
