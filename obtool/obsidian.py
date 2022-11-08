@@ -18,6 +18,8 @@ try:
 except ImportError:
     pass
 
+import click
+
 from obtool.obmark import ObMarkdown
 
 """
@@ -36,6 +38,10 @@ NOTE_FORMATS = ['.md']
 IMAGE_FORMATS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg']
 AUDIO_FORMATS = ['.mp3', '.wav', '.m4a', '.ogg', '.3gp', '.flac']
 VIDEO_FORMATS = ['.mp4', '.webm', '.ogv', '.mov', '.mkv']
+
+
+class ObsidianNotFound(Exception):
+    pass
 
 
 class VaultNotFound(Exception):
@@ -60,15 +66,10 @@ def get_obsidian_system_config():
 
     :return:
     """
-    if sys.platform == 'win32':
-        cfg = Path(os.environ['APPDATA']).joinpath('obsidian/obsidian.json')
-    elif sys.platform == 'linux':
-        cfg = Path(os.environ['HOME']).joinpath('.config/Obsidian/obsidian.json')
-    elif sys.platform == 'darwin':
-        cfg = Path(os.environ['HOME']).joinpath('Library/Application Support/obsidian/obsidian.json')
-    else:
-        raise NotImplemented(f'当前操作系统不支持')
-
+    app_conf_dir = Path(click.get_app_dir('obsidian'))
+    if not app_conf_dir.is_dir():
+        raise ObsidianNotFound('没有找到Obsidian的配置目录。')
+    cfg = app_conf_dir.joinpath('obsidian.json')
     if not cfg.exists():
         raise FileNotFoundError(f'没有找到 Obsidian 配置文件: {cfg}')
     return cfg
