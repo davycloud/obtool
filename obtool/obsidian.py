@@ -11,7 +11,7 @@ from collections import deque, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse, parse_qsl
-from typing import Optional, Union, List, Dict
+from typing import Optional, Union, List, Dict, Iterable
 
 try:
     from rich import print
@@ -274,7 +274,7 @@ class ObVault:
                     raise ValueError("")
         return ObNote(name, None, self)
 
-    def iter_files(self, file_type=''):
+    def iter_files(self, file_type='') -> Iterable["ObFile"]:
         """遍历所有笔记(.md)"""
         for ob_file in self._map.values():
             if (not file_type and not isinstance(ob_file, list)) \
@@ -288,7 +288,7 @@ class ObVault:
                             or getattr(f, 'suffix', None) == file_type:
                         yield f
 
-    def iter_notes(self):
+    def iter_notes(self) -> Iterable["ObNote"]:
         yield from self.iter_files('note')
 
     @property
