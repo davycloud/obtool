@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 import click
+import pyperclip
 
 from obtool.obmark import ObMarkdown
 
@@ -76,7 +77,7 @@ def get_obsidian_system_config():
 
 
 @dataclass
-class ObVaultStat:
+class ObVaultState:
     path: Path
     ts: int
     is_open: bool
@@ -84,18 +85,19 @@ class ObVaultStat:
 
 @dataclass
 class ObURI:
+    url: str
     action: str
     params: dict
 
 
-def get_vaults_list() -> List[ObVaultStat]:
+def get_vaults_list() -> List[ObVaultState]:
     ob_cfg = get_obsidian_system_config()
     ob_vaults = json.loads(ob_cfg.read_text(encoding='utf-8'))['vaults']
-    return [ObVaultStat(Path(v['path']), v['ts'], v.get('open', False))
+    return [ObVaultState(Path(v['path']), v['ts'], v.get('open', False))
             for v in ob_vaults.values()]
 
 
-def find_vault(name_or_path: Union[str, Path]) -> ObVaultStat:
+def find_vault(name_or_path: Union[str, Path]) -> ObVaultState:
     """Locate vault by name or path
     """
     if isinstance(name_or_path, str):
@@ -127,15 +129,13 @@ def parse_obsidian_url(ob_url: str):
         raise ValueError(f'格式错误，"{ob_url[:20]}" 不是以 obsidian:// 开头。')
     u = urlparse(ob_url)
     parsed = parse_qsl(urlparse(ob_url).query)
-    return ObURI(u.path, dict(parsed))
+    return ObURI(ob_url, u.path, dict(parsed))
 
 
-class Obsidian:
-    """Obsidian App"""
-
-    @staticmethod
-    def open_vault(name: str):
-        pass
+def get_uri_from_clip():
+    txt = pyperclip.paste()
+    if txt.startswith('obsidian://'):
+        return parse_obsidian_url(txt)
 
 
 class ObVault:
@@ -160,7 +160,6 @@ class ObVault:
         self._folders: List[Path] = []
         self._files: List[Path] = []
         self._walk()
-        print(len(self._files))
         self._map: Dict[str, Union[List[ObFile], ObFile]] = {}
         self._build_map()
 
@@ -316,6 +315,14 @@ class ObFile:
         self.path = path
         self.vault = vault
         self.name = name
+
+    def long_name(self):
+        rel_path = self.path.relative_to(self.vault.path).as_posix()
+        # return rel_path.removesuffix('.md')   # need python 3.9
+        if rel_path.endswith('.md'):
+            return rel_path[:-3]
+        else:
+            return rel_path
 
     def __repr__(self):
         if self.exists:
