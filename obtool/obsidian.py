@@ -161,6 +161,7 @@ class ObVault:
         self._files: List[Path] = []
         self._walk()
         self._map: Dict[str, Union[List[ObFile], ObFile]] = {}
+        self._same_names = {}
         self._build_map()
 
     def __repr__(self):
@@ -199,20 +200,30 @@ class ObVault:
     def _build_map(self):
         for p in self._files:
             if p.suffix == '.md':
-                key = p.stem
-                ob_file = ObNote(key, p, self)
+                ob_file = ObNote(p, self)
             else:
-                key = p.name
-                ob_file = ObFile(key, p, self)
+                ob_file = ObFile(p, self)
 
-            if key not in self._map:
+            key = ob_file.name
+
+            if key in self._same_names:
+                # 已经有重名记录了，说明这至少是第 3 个重名的了
+                self._map[ob_file.long_name] = ob_file
+                self._same_names[key].append(ob_file)
+            elif key not in self._map:
+                # 没有重名也没有记录，完美
                 self._map[key] = ob_file
             else:
-                # warnings.warn("重复文件", DuplicatedNameWarning)
-                exist = self._map[key]
-                if not isinstance(exist, list):
-                    self._map[key] = [exist]
-                self._map[key].append(ob_file)
+                # 没有重名但是有记录，说明这是刚发现的重名
+                exist = self._map.pop(key)
+                self._same_names[key] = [exist, ob_file]
+                self._map[exist.long_name] = exist
+                self._map[ob_file.long_name] = ob_file
+
+    @property
+    def moc(self):
+        """map of contents"""
+        return self._map
 
     @property
     def same_names(self) -> Dict[str, List[Path]]:
@@ -231,47 +242,51 @@ class ObVault:
         'X.png': [Path('E:/Vault/../X.png'), Path('E:/Vault/.../X.png.md')]
         这种情况如果不是特意构造可能不会出现,但是一旦出现,逻辑无法处理
         """
-        same_names_map = {k: v for k, v in self._map.items() if isinstance(v, list)}
-        for p_list in same_names_map.values():
-            names = set([p.name for p in p_list])
-            assert len(names) == 1, f"无法处理的文件名冲突: {p_list}"
-        return same_names_map
+        return self._same_names
 
-    def get_ob_file(self, name: str):
+    def get_file(self, name: str):
         """根据笔记名获取笔记文件
 
         这里的 name 主要是从链接 [[]] 解析出来的值
         """
-        if name in self._map:  # pure name, without .md suffix
-            p = self._map[name]
-            if isinstance(p, list):
-                raise ValueError(f'有重名,请用相对路径查找. {p}')
-            return p
-        elif '/' in name:  # 相对路径
-            # 这里的问题是无法判断它是笔记还是其它文件
-            # 例如笔记 `x.png.md` 的名字是 `x.png`
-            # 所以不能直接拼路径,还是得查一次
-            folder, name = name.rsplit('/', 1)
+        input_name = name
+        if name in self._map:
+            if name in self._same_names:
+                # 此时表示根目录下有重名笔记的情况出现，应该给与一定的提示
+                pass
+            return self._map[name]
 
-            # 注意, 出现相对路径不代表一定有重名,
-            # 有两种可能:
-            # 1. 链接创建的时候是重名的,但是重名文件后来没有了,链接没有同步更新
-            # 2. 有人偏爱设置了 基于当前笔记的相对路径
-            # 对第 2 种情况,如果没有重名也是可以正确返回的,但是一旦重名就乱套了
-            # 必须提醒注意
+        if name in self._same_names:
+            raise ValueError(f'有重名,请用相对路径查找. {self._same_names[name]}')
+
+        if '/' in name:  # 相对路径
+            # 注意，只可能接受相对仓库的相对路径
+            pth = Path(name)
+            if pth.is_absolute():
+                try:
+                    pth = pth.relative_to(self.path)
+                except ValueError:
+                    raise ValueError(f'仓库外的路径：{input_name}')
+            pth = self.path.joinpath(pth).resolve()
+            try:
+                pth.relative_to(self.path)
+            except ValueError:
+                raise ValueError(f'仓库外的路径：{input_name}')
+
+            name = pth.name
             p = self._map.get(name)
-            if isinstance(p, ObFile):
+            if p:
                 return p
-            elif isinstance(p, list):
+            elif name in self._same_names:
                 # 确实重名了
-                parent = self.path.joinpath(folder)
-                for e in p:
-                    if e.parent == parent:
+                for e in self._same_names[name]:
+                    if e.parent == pth.parent:
                         return e
                 else:
                     # 不可能出现
-                    raise ValueError("")
-        return ObNote(name, None, self)
+                    raise ValueError(f'名字错误 {input_name}')
+        # 找不到？是未创建的笔记
+        return ObNote(None, self, input_name)
 
     def iter_files(self, file_type='') -> Iterable["ObFile"]:
         """遍历所有笔记(.md)"""
@@ -311,11 +326,33 @@ class ObVault:
 class ObFile:
     """Obsidian 笔记库中的文件"""
 
-    def __init__(self, name, path: Optional[Path], vault: ObVault):
+    def __init__(self, path: Optional[Path], vault: ObVault, name=None):
         self.path = path
         self.vault = vault
-        self.name = name
+        if self.path:
+            self.name = self._short_name()
+        else:
+            if not name:
+                raise ValueError(f'path 和 name 不可以都为空。')
+            self.name = name
 
+    def _short_name(self):
+        if self.path:
+            if self.path.suffix == '.md':
+                return self.path.stem
+            else:
+                return self.path.name
+        else:
+            return self.name
+
+    # @property
+    # def short_name(self):
+    #     if self.path.suffix == '.md':
+    #         return self.path.stem
+    #     else:
+    #         return self.path.name
+
+    @property
     def long_name(self):
         rel_path = self.path.relative_to(self.vault.path).as_posix()
         # return rel_path.removesuffix('.md')   # need python 3.9
@@ -362,8 +399,8 @@ class ObFile:
 
 
 class ObNote(ObFile):
-    def __init__(self, name, path: Optional[Path], vault: ObVault):
-        super().__init__(name, path, vault)
+    def __init__(self, path: Optional[Path], vault: ObVault, name=None):
+        super().__init__(path, vault, name)
         self._marks = None
 
     def parse(self):
