@@ -27,7 +27,11 @@ class ObsidianTagExtension(Extension):
 
     def extendMarkdown(self, md):
         self.md = md
-        TAG_RE = r'\s?#([^#\s]+)'
+        TAG_RE = r'(?<!\w)#([^#\s|\[\]\(\)=+,;.\'"\{}!@$%^&*]+)'
+
+        # 下面的匹配不全图标
+        # TAG_RE = r'(?<!\w)#([\w\u00a9\u00ae\u2000-\u3300\ud83c\ud000-\udfff\ud83d\ud000-\udfff\ud83e\ud000-\udfff]+)'
+
         obsidian_tag_pattern = ObTagsInlineProcessor(TAG_RE, self.getConfigs())
         obsidian_tag_pattern.md = md
         md.inlinePatterns.register(obsidian_tag_pattern, 'ob_tag', 40)
@@ -40,24 +44,26 @@ class ObTagsInlineProcessor(InlineProcessor):
 
     def handleMatch(self, m, data):
         label = m.group(1).strip()
-        if label:
-            base_url, end_url, html_class = self._get_config()
-            if '/' in label:
-                # TODO: 也许不需要处理？
-                pass
-            url = self.config['build_url'](label, base_url, end_url)
-            a = etree.Element('a')
-            a.text = label
-            a.set('href', url)
-            if html_class:
-                a.set('class', html_class)
-            if m.group(0).startswith('!'):
-                a.set('embed', 'true')
-            if not hasattr(self.md, 'ob_tags'):
-                self.md.ob_tags = []
-            self.md.ob_tags.append(label)
-        else:
-            a = ''
+        if label.isdigit():
+            return m.group(), None, None
+        if not hasattr(self.md, 'ob_tags'):
+            self.md.ob_tags = []
+        self.md.ob_tags.append(label)
+        # we got obsidian tags, that's main purpose.
+        # the below process convert markdown to html is not used now.
+        base_url, end_url, html_class = self._get_config()
+        if '/' in label:
+            # TODO: 也许不需要处理？
+            pass
+        url = self.config['build_url'](label, base_url, end_url)
+        a = etree.Element('a')
+        a.text = label
+        a.set('href', url)
+        if html_class:
+            a.set('class', html_class)
+        if m.group(0).startswith('!'):
+            a.set('embed', 'true')
+
         return a, m.start(0), m.end(0)
 
     def _get_config(self):
