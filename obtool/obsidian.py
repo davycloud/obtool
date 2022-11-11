@@ -11,7 +11,7 @@ from collections import deque, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse, parse_qsl
-from typing import Optional, Union, List, Dict, Iterable
+from typing import Optional, Union, List, Dict, Set, Iterable
 
 try:
     from rich import print
@@ -129,7 +129,7 @@ def parse_obsidian_url(ob_url: str):
         raise ValueError(f'格式错误，"{ob_url[:20]}" 不是以 obsidian:// 开头。')
     u = urlparse(ob_url)
     parsed = parse_qsl(urlparse(ob_url).query)
-    return ObURI(ob_url, u.path, dict(parsed))
+    return ObURI(ob_url, u.netloc, dict(parsed))
 
 
 def get_uri_from_clip():
@@ -159,9 +159,10 @@ class ObVault:
 
         self._folders: List[Path] = []
         self._files: List[Path] = []
+        self._tags: Dict[str, Set['ObNote']] = defaultdict(set)
         self._walk()
-        self._map: Dict[str, Union[List[ObFile], ObFile]] = {}
-        self._same_names = {}
+        self._map: Dict[str, ObFile] = {}
+        self._same_names: Dict[str, List[ObFile]] = {}
         self._build_map()
 
     def __repr__(self):
@@ -226,7 +227,7 @@ class ObVault:
         return self._map
 
     @property
-    def same_names(self) -> Dict[str, List[Path]]:
+    def same_names(self) -> Dict[str, List['ObFile']]:
         """返回所有的同名文件组成的字典
 
         key 是文件名(如果是 `.md` 则不含后缀,其它文件包含后缀)
@@ -244,7 +245,7 @@ class ObVault:
         """
         return self._same_names
 
-    def get_file(self, name: str):
+    def get_file(self, name: str) -> Union['ObFile', List['ObFile']]:
         """根据笔记名获取笔记文件
 
         这里的 name 主要是从链接 [[]] 解析出来的值
@@ -253,14 +254,18 @@ class ObVault:
         if name in self._map:
             if name in self._same_names:
                 # 此时表示根目录下有重名笔记的情况出现，应该给与一定的提示
+                # _sames = self.same_names[name]
+                # print(f'{name} 还有同名笔记：{_sames}')
                 pass
             return self._map[name]
 
         if name in self._same_names:
-            raise ValueError(f'有重名,请用相对路径查找. {self._same_names[name]}')
+            # 直接报错貌似有点不够友好，返回重名列表？
+            # raise ValueError(f'有重名,请用相对路径查找. {self._same_names[name]}')
+            return self._same_names[name]
 
         if '/' in name:  # 相对路径
-            # 注意，只可能接受相对仓库的相对路径
+            # 注意，相对仓库的根路径
             pth = Path(name)
             if pth.is_absolute():
                 try:
@@ -277,15 +282,23 @@ class ObVault:
             p = self._map.get(name)
             if p:
                 return p
-            elif name in self._same_names:
+            if name in self._same_names:
                 # 确实重名了
                 for e in self._same_names[name]:
+                    #
                     if e.parent == pth.parent:
                         return e
-                else:
-                    # 不可能出现
-                    raise ValueError(f'名字错误 {input_name}')
-        # 找不到？是未创建的笔记
+            # 未创建，并且使用了相对路径
+            return ObNote(None, self, input_name)
+        # 所有找不到的都是未创建的笔记
+        # Obsidian 中，
+        # 如果名字没有带路径，则自动创建到笔记目录下，例如：
+        #    假如笔记目录是 `Notes`，[[a_new_note]]
+        #    创建到 `Notes/a_new_note.md`
+        # 如果名字带有路径，则路径是相对仓库根目录来创建
+        #    [[new_folder/new_note]]
+        #    创建到 `new_folder/new_note.md`
+        # 不存在的文件夹也是自动创建
         return ObNote(None, self, input_name)
 
     def iter_files(self, file_type='') -> Iterable["ObFile"]:
@@ -309,48 +322,47 @@ class ObVault:
     def notes(self):
         return list(self.iter_notes())
 
-    def info(self):
-        print(f'文件夹数量：{len(self._folders)}')
-        print(f'文件数量：{len(self._files)}')
+    @property
+    def folders(self):
+        return self._folders
 
-        group_by_suffix = defaultdict(int)
+    @property
+    def files(self):
+        return self._files
+
+    @property
+    def tags(self):
+        return self._tags
+
+    def count_by_suffix(self):
+        """按后缀统计文件数量"""
+        g = defaultdict(int)
         for file in self.iter_files():
-            group_by_suffix[file.suffix] += 1
-        print(group_by_suffix)
-
-        duplicated = self.same_names
-        if duplicated:
-            print(f'存在重名的文件：\n{duplicated}')
+            g[file.suffix] += 1
+        return g
 
 
 class ObFile:
     """Obsidian 笔记库中的文件"""
 
-    def __init__(self, path: Optional[Path], vault: ObVault, name=None):
+    def __init__(self, path: Optional[Path], vault: ObVault, name: str = ''):
+        if not path and not name:
+            raise ValueError(f'path 和 name 不可以都为空。')
+        if path is None:
+            path = vault.path.joinpath(name + '.md')
         self.path = path
         self.vault = vault
-        if self.path:
+        self._input_name = name
+        if self.exists:
             self.name = self._short_name()
         else:
-            if not name:
-                raise ValueError(f'path 和 name 不可以都为空。')
-            self.name = name
+            self.name = self._input_name
 
     def _short_name(self):
-        if self.path:
-            if self.path.suffix == '.md':
-                return self.path.stem
-            else:
-                return self.path.name
+        if self.path.suffix == '.md':
+            return self.path.stem
         else:
-            return self.name
-
-    # @property
-    # def short_name(self):
-    #     if self.path.suffix == '.md':
-    #         return self.path.stem
-    #     else:
-    #         return self.path.name
+            return self.path.name
 
     @property
     def long_name(self):
@@ -362,10 +374,9 @@ class ObFile:
             return rel_path
 
     def __repr__(self):
-        if self.exists:
-            info = self.path.as_posix()
-        else:
-            info = '未创建'
+        info = self.path.as_posix()
+        if not self.exists:
+            info += ' (未创建)'
         return f'<{self.__class__.__name__}: {self.name} [{info}]>'
 
     @property
@@ -402,12 +413,29 @@ class ObNote(ObFile):
     def __init__(self, path: Optional[Path], vault: ObVault, name=None):
         super().__init__(path, vault, name)
         self._marks = None
+        self._parsed = False
 
     def parse(self):
         if self.vault.use_markdown_links:
             raise ValueError("Obsidian 仓库的链接设置没有开启 Wiki 链接而是使用标准 MD 语法。")
         if self.exists:
-            self._marks = ObMarkdown().parse(self.path)
+            marks = self._marks = ObMarkdown().parse(self.path)
+            tags = marks.tags[:]
+            tags_in_meta = marks.meta.get('tags', [])
+            if isinstance(tags_in_meta, str):
+                tags_in_meta = tags_in_meta.split(',')
+            tags.extend(tags_in_meta)
+
+            for tag in tags:
+                self.vault.tags[tag].add(self)
+                if '/' in tag:
+                    i = 0
+                    while True:
+                        i = tag.find('/', i)
+                        if i < 0:
+                            break
+                        self.vault.tags[tag[:i]].add(self)
+                        i += 1
 
     def info(self):
         return self._marks
