@@ -2,16 +2,15 @@
 # 关于 Obsidian 的对象接口都在这里
 
 """
-
-import os
-import sys
+import functools
 import json
 import warnings
+import datetime
 from collections import deque, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse, parse_qsl
-from typing import Optional, Union, List, Dict, Set, Iterable
+from typing import Optional, Union, List, Dict, Set, Iterable, Callable, Any
 
 try:
     from rich import print
@@ -21,7 +20,7 @@ except ImportError:
 import click
 import pyperclip
 
-from obtool.obmark import ObMarkdown
+from obtool.obmark import ObMarkdown, ObMarks
 
 """
 https://help.obsidian.md/Advanced+topics/Accepted+file+formats
@@ -81,6 +80,10 @@ class ObVaultState:
     path: Path
     ts: int
     is_open: bool
+
+    @property
+    def created_time(self) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(self.ts // 1000)
 
 
 @dataclass
@@ -164,6 +167,8 @@ class ObVault:
         self._map: Dict[str, ObFile] = {}
         self._same_names: Dict[str, List[ObFile]] = {}
         self._build_map()
+        # 耗时任务的进度条
+        self.progress_bar: Optional[Callable[[Iterable], Any]] = None
 
     def __repr__(self):
         return f'<ObVault: {self.name}>'
@@ -288,8 +293,6 @@ class ObVault:
                     #
                     if e.parent == pth.parent:
                         return e
-            # 未创建，并且使用了相对路径
-            return ObNote(None, self, input_name)
         # 所有找不到的都是未创建的笔记
         # Obsidian 中，
         # 如果名字没有带路径，则自动创建到笔记目录下，例如：
@@ -304,16 +307,10 @@ class ObVault:
     def iter_files(self, file_type='') -> Iterable["ObFile"]:
         """遍历所有笔记(.md)"""
         for ob_file in self._map.values():
-            if (not file_type and not isinstance(ob_file, list)) \
+            if not file_type \
                     or getattr(ob_file, 'file_type', None) == file_type \
                     or getattr(ob_file, 'suffix', None) == file_type:
                 yield ob_file
-            elif isinstance(ob_file, list):
-                for f in ob_file:
-                    if (not file_type) \
-                            or getattr(f, 'file_type', None) == file_type \
-                            or getattr(f, 'suffix', None) == file_type:
-                        yield f
 
     def iter_notes(self) -> Iterable["ObNote"]:
         yield from self.iter_files('note')
@@ -334,12 +331,36 @@ class ObVault:
     def tags(self):
         return self._tags
 
+    def add_tag(self, tag, note):
+        self._tags[tag].add(note)
+
     def count_by_suffix(self):
         """按后缀统计文件数量"""
         g = defaultdict(int)
         for file in self.iter_files():
             g[file.suffix] += 1
         return g
+
+    def find_notes_by_tags(self, tags, op='AND'):
+        if op == 'OR':
+            func = set.union
+        else:
+            func = set.intersection
+        return functools.reduce(func, (self.tags[t] for t in tags))
+
+    def parse_all(self, progress_bar=None):
+        """解析所有笔记"""
+        if not self.all_parsed:
+            not_parsed = [n for n in self.iter_notes() if not n.parsed]
+            progress_bar = progress_bar or self.progress_bar
+            if progress_bar:
+                not_parsed = progress_bar(not_parsed)
+            for note in not_parsed:
+                note.parse()
+
+    @property
+    def all_parsed(self):
+        return all(n.parsed for n in self.iter_notes())
 
 
 class ObFile:
@@ -359,15 +380,18 @@ class ObFile:
             self.name = self._input_name
 
     def _short_name(self):
-        if self.path.suffix == '.md':
+        if self.is_note():
             return self.path.stem
         else:
             return self.path.name
 
+    def is_note(self):
+        return self.path.suffix == '.md'
+
     @property
     def long_name(self):
         rel_path = self.path.relative_to(self.vault.path).as_posix()
-        # return rel_path.removesuffix('.md')   # need python 3.9
+        # return rel_path.removesuffix('.md')   # noqa, need python 3.9
         if rel_path.endswith('.md'):
             return rel_path[:-3]
         else:
@@ -412,33 +436,46 @@ class ObFile:
 class ObNote(ObFile):
     def __init__(self, path: Optional[Path], vault: ObVault, name=None):
         super().__init__(path, vault, name)
-        self._marks = None
-        self._parsed = False
+        self._marks: Optional[ObMarks] = None
+        self._tags = None
+        self._links = None
 
     def parse(self):
+        if self._marks:
+            return
         if self.vault.use_markdown_links:
-            raise ValueError("Obsidian 仓库的链接设置没有开启 Wiki 链接而是使用标准 MD 语法。")
+            raise ValueError("Obsidian 仓库的链接设置没有开启 Wiki 链接格式。")
         if self.exists:
             marks = self._marks = ObMarkdown().parse(self.path)
-            tags = marks.tags[:]
+            self._tags = tags = marks.tags[:]
             tags_in_meta = marks.meta.get('tags', [])
             if isinstance(tags_in_meta, str):
                 tags_in_meta = tags_in_meta.split(',')
             tags.extend(tags_in_meta)
 
             for tag in tags:
-                self.vault.tags[tag].add(self)
-                if '/' in tag:
+                self.vault.add_tag(tag, self)
+                if '/' in tag:  # 嵌套标签要逐个加上
                     i = 0
                     while True:
                         i = tag.find('/', i)
                         if i < 0:
                             break
-                        self.vault.tags[tag[:i]].add(self)
+                        self.vault.add_tag(tag[:i], self)
                         i += 1
 
-    def info(self):
-        return self._marks
+    @property
+    def tags(self):
+        return self._tags
+
+    @property
+    def links(self):
+        if self._marks:
+            return self._marks.links
+
+    @property
+    def parsed(self):
+        return self._marks is not None
 
 
 def main():
