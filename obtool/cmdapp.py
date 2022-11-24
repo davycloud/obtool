@@ -22,6 +22,8 @@ class App(cmd2.Cmd):
         self.vault: Optional[ObVault] = None
         self.vault_list = get_vaults_list()
         self._vault_cache = {}
+        self.aliases['cls'] = '!cls'
+        self.aliases['exit'] = 'quit'
 
     def poutput(self, msg: Any = '', *, end: str = '\n') -> None:
         if isinstance(msg, str) and ansi.ANSI_STYLE_RE.match(msg):
