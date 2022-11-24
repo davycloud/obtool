@@ -165,6 +165,7 @@ class ObVault:
         self._tags: Dict[str, Set['ObNote']] = defaultdict(set)
         self._walk()
         self._map: Dict[str, ObFile] = {}
+        self._back_links: Dict[str, Set[ObNote]] = defaultdict(set)
         self._same_names: Dict[str, List[ObFile]] = {}
         self._build_map()
         # 耗时任务的进度条
@@ -334,6 +335,9 @@ class ObVault:
     def add_tag(self, tag, note):
         self._tags[tag].add(note)
 
+    def add_back_link(self, name, note):
+        self._back_links[name].add(note)
+
     def count_by_suffix(self):
         """按后缀统计文件数量"""
         g = defaultdict(int)
@@ -348,7 +352,7 @@ class ObVault:
             func = set.intersection
         return functools.reduce(func, (self.tags[t] for t in tags))
 
-    def parse_all(self, progress_bar=None):
+    def ensure_all_parsed(self, progress_bar=None):
         """解析所有笔记"""
         if not self.all_parsed:
             not_parsed = [n for n in self.iter_notes() if not n.parsed]
@@ -361,6 +365,9 @@ class ObVault:
     @property
     def all_parsed(self):
         return all(n.parsed for n in self.iter_notes())
+
+    def get_back_links(self, name):
+        return list(self._back_links.get(name, []))
 
 
 class ObFile:
@@ -463,6 +470,8 @@ class ObNote(ObFile):
                             break
                         self.vault.add_tag(tag[:i], self)
                         i += 1
+            for link_name in marks.links:
+                self.vault.add_back_link(link_name, self)
 
     @property
     def tags(self):
