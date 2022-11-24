@@ -1,17 +1,16 @@
 import functools
-from typing import List, Iterable
+from typing import List, Iterable, cast
 
-from collections import OrderedDict
-
-from rich.console import Console
+from rich import get_console, print
 from rich.text import Text
 from rich.columns import Columns
+from rich.table import Table
 from rich.progress import track
 
 from .banner import print_banner
 from .obsidian import ObVaultState, ObVault, ObFile, ObNote
 
-console = Console()
+console = get_console()
 
 
 def display_banner():
@@ -43,37 +42,76 @@ def display_filenames(file_names: Iterable[str]):
     console.print(columns)
 
 
-def display_file_details(files):
+def display_file_stat(vault: ObVault, name: str, show_back_links=False):
     """展示文件详情"""
-    pass
+    print()
+    ob_file = vault.get_file(name)
+    if not ob_file.exists:
+        print('该文件还不存在。')
+        return
+    table = Table(title="", box=None,
+                  show_header=False, show_edge=False)
+    table.add_row('名称', str(ob_file.name))
+    table.add_row('路径', str(ob_file.path))
+    if ob_file.is_note():
+        ob_file = cast(ObNote, ob_file)
+        ob_file.parse()
+        table.add_row('标签', ','.join(ob_file.tags))
+        table.add_row('链接', '\n'.join(ob_file.links))
+        if show_back_links:
+            vault.ensure_all_parsed()
+            back_links = [note.name for note in vault.get_back_links(name)]
+            table.add_row('反链', '\n'.join(back_links))
+    console.print(table)
 
 
-def display_vault_info(vault: ObVault, show_same_names, parse_all):
-    info_dict = OrderedDict()
-    info_dict['💼 仓库名称'] = vault.name
-    info_dict['📁 文件夹数量'] = len(vault.folders)
-    info_dict['📄 总文件数量'] = len(vault.files)
-    info_dict['📝 总笔记数量'] = len(vault.notes)
+def display_vault_stat(vault: ObVault, show_tags=False, show_same_names=False):
+    print()
+    table = Table(title="", box=None,
+                  show_header=False, show_edge=False)
+    table.add_column()
+    table.add_column(justify="right", style="cyan")
+    table.add_row('💼 仓库名称', str(vault.name))
+    table.add_row('📁 文件夹数量', str(len(vault.folders)))
+    table.add_row('📄 总文件数量', str(len(vault.files)))
+    table.add_row('📝 总笔记数量', str(len(vault.notes)))
+    console.print(table)
 
+    print()
+    table = Table(title="按文件后缀统计数量", box=None, show_edge=False)
+    table.add_column("文件后缀")
+    table.add_column("文件数量", justify="right", style="cyan")
     count_by_suffix = vault.count_by_suffix()
     for suffix, count in count_by_suffix.items():
-        print(f' {suffix}：  {count}')
+        table.add_row(f' {suffix}', f'{count}')
+    console.print(table)
+
+    print()
     same_names_count = len(vault.same_names)
-    print(f'有 {same_names_count} 个文件重名。')
-    if show_same_names:
-        for name, files in vault.same_names.items():
-            print(f'{name}: ')
-            for f in files:
-                print(f'  {f.path.as_posix()}')
-    if parse_all:
-        # parse_vault(vault)
+    if same_names_count > 0:
+        print(f'有 {same_names_count} 个文件重名。')
+        if show_same_names:
+            for name, files in vault.same_names.items():
+                print(f'{name}: ')
+                for f in files:
+                    print(f'  {f.path.as_posix()}')
+        else:
+            print(f'使用 [cyan]--show-same-names[/] 选项显示重名文件信息\n')
+    else:
+        print('没有重名文件。\n')
+
+    if show_tags:
+        vault.ensure_all_parsed()
+
         print(f'🏷 标签数量：{len(vault.tags)}')
+        tags_table = Table(title="", show_edge=False)
+        tags_table.add_column("标签")
+        tags_table.add_column("数量", justify="center", style="cyan")
         tags = list(vault.tags.items())
         tags.sort(key=lambda t: len(t[1]), reverse=True)
         for tag, tagged_notes in tags:
-            print(f'  {tag}   {len(tagged_notes)}')
-            for note in tagged_notes:
-                print(f'        {note.name}')
+            tags_table.add_row(f'{tag}', f'{len(tagged_notes)}')
+        print(tags_table)
 
 
 def setup_vault(vault: ObVault):

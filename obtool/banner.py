@@ -20,6 +20,11 @@ def get_terminal_width() -> int:
 
 # https://textpaint.net/
 def print_banner(console) -> None:
+    panel = get_banner()
+    console.print(panel)
+
+
+def get_banner():
     width = get_terminal_width()
     height = 8
     banner = """\
@@ -30,7 +35,6 @@ def print_banner(console) -> None:
 ║╚═╝║║╚╝║ ╔╝╚╗ ║╚╝║║╚╝║║╚╗
 ╚═══╝╚══╝ ╚══╝ ╚══╝╚══╝╚═╝
 """
-
     panel = Panel(
         Align(
             Text(banner, justify="center", style="#7b67d3"),
@@ -41,7 +45,7 @@ def print_banner(console) -> None:
         height=height,
         subtitle="by davy (https://davycloud.com)",
     )
-    console.print(panel)
+    return panel
 
 
 if __name__ == '__main__':
