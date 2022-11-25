@@ -27,4 +27,4 @@ dynamic = ["version", "description"]
 Home = "https://github.com/davycloud/obtool"
 
 [project.scripts]
-ob = "obtool.cli:main"
+ob = "obtool.cmdapp:main"
