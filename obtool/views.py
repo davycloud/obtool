@@ -1,10 +1,12 @@
 import functools
-from typing import List, Iterable, cast
+from pathlib import Path
+from typing import List, Iterable, cast, Union
 
 from rich import get_console, print
 from rich.text import Text
 from rich.columns import Columns
 from rich.table import Table
+from rich.tree import Tree
 from rich.progress import track
 
 from .banner import print_banner
@@ -40,6 +42,19 @@ def display_filenames(file_names: Iterable[str]):
     """展示文件名"""
     columns = Columns(file_names, equal=True, expand=True)
     console.print(columns)
+
+
+def display_vault_folders(vault: ObVault):
+    """显示文件夹
+
+    注意，这里由于确定路径的顺序是从外到内生成的，所以没有再判断和排序
+    """
+    tree = Tree("")
+    nodes = {}
+    for path in vault.folders:
+        node = nodes.get(path.parent, tree)
+        nodes[path] = node.add(path.name)
+    print(tree)
 
 
 def display_file_stat(vault: ObVault, name: str, show_back_links=False):
@@ -96,7 +111,7 @@ def display_vault_stat(vault: ObVault, show_tags=False, show_same_names=False):
                 for f in files:
                     print(f'  {f.path.as_posix()}')
         else:
-            print(f'使用 [cyan]--show-same-names[/] 选项显示重名文件信息\n')
+            print(f'使用 [cyan]--same-names[/] 选项显示重名文件信息\n')
     else:
         print('没有重名文件。\n')
 
@@ -104,7 +119,7 @@ def display_vault_stat(vault: ObVault, show_tags=False, show_same_names=False):
         vault.ensure_all_parsed()
 
         print(f'🏷 标签数量：{len(vault.tags)}')
-        tags_table = Table(title="", show_edge=False)
+        tags_table = Table(title="", box=None)
         tags_table.add_column("标签")
         tags_table.add_column("数量", justify="center", style="cyan")
         tags = list(vault.tags.items())

@@ -233,6 +233,12 @@ class ObVault:
         return self._map
 
     @property
+    def settings(self):
+        if not self._settings:
+            self.load_settings()
+        return self._settings
+
+    @property
     def same_names(self) -> Dict[str, List['ObFile']]:
         """返回所有的同名文件组成的字典
 
@@ -438,6 +444,17 @@ class ObFile:
             return 'audio'
         else:
             return self.suffix
+
+    def in_folder(self, folder: Union[str, Path]) -> bool:
+        if isinstance(folder, str):
+            folder = Path(folder)
+
+        try:
+            self.path.relative_to(folder)
+        except ValueError:
+            return False
+        else:
+            return True
 
 
 class ObNote(ObFile):

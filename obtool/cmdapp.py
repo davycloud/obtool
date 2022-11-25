@@ -1,5 +1,6 @@
 import sys
 from typing import List, Optional, Any
+from pathlib import Path
 
 import cmd2
 from cmd2 import Cmd2ArgumentParser, with_argparser, with_category, Fg, ansi
@@ -24,6 +25,7 @@ class App(cmd2.Cmd):
         self._vault_cache = {}
         self.aliases['cls'] = '!cls'
         self.aliases['exit'] = 'quit'
+        print(self.editor)
 
     def poutput(self, msg: Any = '', *, end: str = '\n') -> None:
         if isinstance(msg, str) and ansi.ANSI_STYLE_RE.match(msg):
@@ -51,11 +53,18 @@ class App(cmd2.Cmd):
         kwargs.pop('cmd2_handler')
         return kwargs
 
+    def vault_folders(self) -> List[str]:
+        if not self.vault:
+            return []
+        folders = [f.relative_to(self.vault.path).as_posix() for f in self.vault.folders]
+        return folders
+
     ls_parser = Cmd2ArgumentParser()
     ls_parser.add_argument('-a', '--all', action='store_true', dest='show_all', help='展示详情')
+    ls_parser.add_argument('-d', '--directory', action='store_true', dest='show_directory', help='展示文件夹')
     ls_parser.add_argument('-s', '--suffix', help='指定文件后缀，如 .png')
     ls_parser.add_argument('-t', '--tag', action='append', dest='tags', help='指定笔记标签，可多次使用')
-    ls_parser.add_argument('folder', nargs='?', help='指定文件夹')
+    ls_parser.add_argument('folder', nargs='?', choices_provider=vault_folders, help='指定文件夹')
 
     @with_argparser(ls_parser)
     @with_category('ObTool 命令')
@@ -69,7 +78,10 @@ class App(cmd2.Cmd):
             views.display_vault_list(self.vault_list,
                                      show_detail=args.show_all)
         else:
-            self.list_vault_files(**self._kwargs(args))
+            if args.show_directory:
+                views.display_vault_folders(vault)
+            else:
+                self.list_vault_files(**self._kwargs(args))
 
     def list_vault_files(self, show_all=False, suffix=None, tags=None, **kwargs):
         if not self.vault:
@@ -85,7 +97,12 @@ class App(cmd2.Cmd):
             data = self.vault.find_notes_by_tags(tags, op=op)
         else:
             data = self.vault.iter_notes()
-
+        folder = kwargs.pop('folder', None)
+        if folder:
+            folder = Path(folder)
+            if not folder.is_absolute():
+                folder = self.vault.path.joinpath(folder)
+            data = (f for f in data if f.in_folder(folder=folder))
         views.display_filenames(f.name for f in data)
 
     def get_vault(self, vault_name):
@@ -123,13 +140,13 @@ class App(cmd2.Cmd):
             return []
         return list(self.vault.moc.keys())
 
-    info_parser = Cmd2ArgumentParser()
-    info_parser.add_argument('--name', nargs='?', choices_provider=note_names, help='笔记/文件名称')
-    info_parser.add_argument('--same-names', action='store_true', help='显示同名文件')
-    info_parser.add_argument('--tags', action='store_true', help='统计标签数量')
-    info_parser.add_argument('--back-links', action='store_true', help='统计反链（指定文件名有效）')
+    stat_parser = Cmd2ArgumentParser()
+    stat_parser.add_argument('--name', nargs='?', choices_provider=note_names, help='笔记/文件名称')
+    stat_parser.add_argument('--same-names', action='store_true', help='显示同名文件')
+    stat_parser.add_argument('--tags', action='store_true', help='统计标签数量')
+    stat_parser.add_argument('--back-links', action='store_true', help='统计反链（指定文件名有效）')
 
-    @with_argparser(info_parser)
+    @with_argparser(stat_parser)
     @with_category('ObTool 命令')
     def do_stat(self, args):
         """统计笔记数量"""
@@ -145,6 +162,14 @@ class App(cmd2.Cmd):
                                     name=args.name,
                                     show_back_links=args.back_links
                                     )
+
+    @with_category('ObTool 命令')
+    def do_settings(self, args):
+        """展示当前仓库的配置文件内容"""
+        if self.vault is None:
+            print(f'先使用 vault 指定仓库')
+            return
+        print(self.vault.settings)
 
 
 def main():
