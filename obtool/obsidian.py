@@ -17,10 +17,10 @@ try:
 except ImportError:
     pass
 
-import click
 import pyperclip
 
 from obtool.obmark import ObMarkdown, ObMarks
+from obtool.utils import get_app_dir
 
 """
 https://help.obsidian.md/Advanced+topics/Accepted+file+formats
@@ -66,7 +66,7 @@ def get_obsidian_system_config():
 
     :return:
     """
-    app_conf_dir = Path(click.get_app_dir('obsidian'))
+    app_conf_dir = Path(get_app_dir('obsidian'))
     if not app_conf_dir.is_dir():
         raise ObsidianNotFound('没有找到Obsidian的配置目录。')
     cfg = app_conf_dir.joinpath('obsidian.json')
