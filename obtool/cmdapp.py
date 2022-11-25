@@ -1,9 +1,18 @@
+import os
 import sys
 from typing import List, Optional, Any
+import argparse
 from pathlib import Path
 
 import cmd2
-from cmd2 import Cmd2ArgumentParser, with_argparser, with_category, Fg, ansi
+from cmd2 import (
+    Cmd2ArgumentParser,
+    with_argparser,
+    with_category,
+    Fg,
+    ansi,
+    utils as cmd2utils
+)
 
 from obtool.obsidian import get_vaults_list, ObVault, get_uri_from_clip, ObFile
 from obtool import views
@@ -25,7 +34,6 @@ class App(cmd2.Cmd):
         self._vault_cache = {}
         self.aliases['cls'] = '!cls'
         self.aliases['exit'] = 'quit'
-        print(self.editor)
 
     def poutput(self, msg: Any = '', *, end: str = '\n') -> None:
         if isinstance(msg, str) and ansi.ANSI_STYLE_RE.match(msg):
@@ -135,13 +143,18 @@ class App(cmd2.Cmd):
         return self.basic_complete(text, line, begidx, endidx,
                                    match_against=vault_name_list)
 
-    def note_names(self) -> List[str]:
+    def file_names(self) -> List[str]:
         if not self.vault:
             return []
         return list(self.vault.moc.keys())
 
+    def note_names(self) -> List[str]:
+        if not self.vault:
+            return []
+        return [n.name for n in self.vault.notes]
+
     stat_parser = Cmd2ArgumentParser()
-    stat_parser.add_argument('--name', nargs='?', choices_provider=note_names, help='笔记/文件名称')
+    stat_parser.add_argument('--name', nargs='?', choices_provider=file_names, help='笔记/文件名称')
     stat_parser.add_argument('--same-names', action='store_true', help='显示同名文件')
     stat_parser.add_argument('--tags', action='store_true', help='统计标签数量')
     stat_parser.add_argument('--back-links', action='store_true', help='统计反链（指定文件名有效）')
@@ -170,6 +183,35 @@ class App(cmd2.Cmd):
             print(f'先使用 vault 指定仓库')
             return
         print(self.vault.settings)
+
+    edit_parser = Cmd2ArgumentParser()
+    edit_parser.add_argument(
+        'name', nargs=argparse.OPTIONAL, choices_provider=note_names, help="要打开的笔记名",
+    )
+
+    @with_category('ObTool 命令')
+    @with_argparser(edit_parser)
+    def do_edit(self, args) -> None:
+        """使用编辑器打开笔记
+         - 如果没有指定笔记名，则打开笔记库文件夹
+         - 如果没有查找到默认的编辑器，使用下面的命令设置：
+            "set editor (program-name)"
+        """
+        if not self.vault:
+            print(f'先使用 vault 指定仓库')
+            return
+        if not self.editor:
+            raise EnvironmentError("Please use 'set editor' to specify your text editing program of choice.")
+
+        command = self.editor
+        if args.name:
+            edit_path = self.vault.get_file(args.name).path.as_posix()
+        else:
+            edit_path = self.vault.path.as_posix()
+
+        command += " " + cmd2utils.quote_string_if_needed(edit_path)
+
+        self.do_shell(command)  # noqa
 
 
 def main():
